@@ -21,6 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // - 폭탄은 잠시 후 십자 모양으로 폭발
 // - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
 // - 몹 처치 시 10% 확률로 아이템 드랍 (초록: 범위 증가, 노랑: 폭탄 개수 증가)
+// - 자신이 설치한 폭탄 폭발 범위에 들어가면 게임 오버
 
 const CELL_SIZE: i32 = 40;
 const GRID_WIDTH: i32 = 13;
@@ -83,6 +84,7 @@ struct GameState {
     pending_item_drops: Vec<PendingItemDrop>,
     bomb_range: i32,
     max_bombs: usize,
+    game_over: bool,
     rng_state: u64,
     last_spawn: Instant,
 }
@@ -99,6 +101,7 @@ impl GameState {
             pending_item_drops: Vec::new(),
             bomb_range: 1,
             max_bombs: DEFAULT_MAX_BOMBS,
+            game_over: false,
             rng_state: now.elapsed().as_nanos() as u64 | 1,
             last_spawn: now,
         };
@@ -193,10 +196,8 @@ impl GameState {
         for mob in killed_mobs {
             if self.roll_percent(ITEM_DROP_CHANCE_PERCENT) {
                 let kind = self.random_drop_kind();
-                self.pending_item_drops.push(PendingItemDrop {
-                    pos: mob.pos,
-                    kind,
-                });
+                self.pending_item_drops
+                    .push(PendingItemDrop { pos: mob.pos, kind });
             }
         }
     }
@@ -220,6 +221,16 @@ impl GameState {
         });
     }
 
+    fn is_player_in_explosion(&self) -> bool {
+        self.explosions.iter().any(|(pos, _)| *pos == self.player)
+    }
+
+    fn check_game_over(&mut self) {
+        if !self.game_over && self.is_player_in_explosion() {
+            self.game_over = true;
+        }
+    }
+
     fn try_pickup_item(&mut self) {
         if let Some(index) = self.items.iter().position(|item| item.pos == self.player) {
             let item = self.items.remove(index);
@@ -235,6 +246,10 @@ impl GameState {
     }
 
     fn update(&mut self) {
+        if self.game_over {
+            return;
+        }
+
         let now = Instant::now();
 
         // 폭탄 업데이트
@@ -280,6 +295,8 @@ impl GameState {
                 self.last_spawn = now;
             }
         }
+
+        self.check_game_over();
     }
 
     fn add_cross_explosion(&mut self, center: Pos, now: Instant) {
@@ -302,6 +319,10 @@ impl GameState {
     }
 
     fn move_player(&mut self, dx: i32, dy: i32) {
+        if self.game_over {
+            return;
+        }
+
         let nx = self.player.x + dx;
         let ny = self.player.y + dy;
         let next = Pos { x: nx, y: ny };
@@ -314,10 +335,15 @@ impl GameState {
             self.player.x = nx;
             self.player.y = ny;
             self.try_pickup_item();
+            self.check_game_over();
         }
     }
 
     fn place_bomb(&mut self) {
+        if self.game_over {
+            return;
+        }
+
         // 동시에 놓을 수 있는 폭탄 수 제한
         if self.bombs.len() >= self.max_bombs {
             return;
@@ -417,7 +443,15 @@ unsafe fn paint(hwnd: HWND) {
     }
 
     // 플레이어
-    draw_cell(hdc, state.player, player_brush);
+    if !state.game_over {
+        draw_cell(hdc, state.player, player_brush);
+    }
+
+    if state.game_over {
+        let overlay_brush = create_brush(30, 30, 30);
+        FillRect(hdc, &rect, overlay_brush);
+        let _ = DeleteObject(overlay_brush.into());
+    }
 
     let _ = DeleteObject(bg_brush.into());
     let _ = DeleteObject(player_brush.into());
@@ -443,13 +477,26 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_TIMER => {
             if wparam.0 == TIMER_ID {
-                game_state().lock().unwrap().update();
-                // 다시 그리기
+                let became_game_over = {
+                    let mut state = game_state().lock().unwrap();
+                    let was_over = state.game_over;
+                    state.update();
+                    !was_over && state.game_over
+                };
+
+                if became_game_over {
+                    let _ = SetWindowTextW(hwnd, w!("폭탄 게임 - 게임 오버"));
+                }
+
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
         }
         WM_KEYDOWN => {
             let mut state = game_state().lock().unwrap();
+            if state.game_over {
+                return LRESULT(0);
+            }
+
             match wparam.0 as u32 {
                 0x25 => state.move_player(-1, 0), // VK_LEFT
                 0x26 => state.move_player(0, -1), // VK_UP
