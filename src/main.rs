@@ -20,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // - Space 로 폭탄 설치
 // - 폭탄은 잠시 후 십자 모양으로 폭발
 // - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
+// - 몹 처치 시 10% 확률로 폭발 범위 증가 아이템 드랍
 
 const CELL_SIZE: i32 = 40;
 const GRID_WIDTH: i32 = 13;
@@ -32,6 +33,8 @@ const EXPLOSION_MS: u64 = 400;
 const MAX_MOBS: usize = 8;
 const MOB_SPAWN_INTERVAL_MS: u64 = 2500;
 const INITIAL_MOB_COUNT: usize = 4;
+const ITEM_DROP_CHANCE_PERCENT: u32 = 10;
+const MAX_BOMB_RANGE: i32 = 5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Pos {
@@ -51,11 +54,31 @@ struct Mob {
     pos: Pos,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemKind {
+    RangeUp,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Item {
+    pos: Pos,
+    kind: ItemKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PendingItemDrop {
+    pos: Pos,
+    kind: ItemKind,
+}
+
 struct GameState {
     player: Pos,
     bombs: Vec<Bomb>,
     explosions: Vec<(Pos, Instant)>,
     mobs: Vec<Mob>,
+    items: Vec<Item>,
+    pending_item_drops: Vec<PendingItemDrop>,
+    bomb_range: i32,
     rng_state: u64,
     last_spawn: Instant,
 }
@@ -68,6 +91,9 @@ impl GameState {
             bombs: Vec::new(),
             explosions: Vec::new(),
             mobs: Vec::new(),
+            items: Vec::new(),
+            pending_item_drops: Vec::new(),
+            bomb_range: 1,
             rng_state: now.elapsed().as_nanos() as u64 | 1,
             last_spawn: now,
         };
@@ -87,6 +113,10 @@ impl GameState {
         (self.rng_state >> 32) as u32
     }
 
+    fn roll_percent(&mut self, percent: u32) -> bool {
+        self.next_random() % 100 < percent
+    }
+
     fn is_occupied(&self, pos: Pos) -> bool {
         if self.player == pos {
             return true;
@@ -95,6 +125,9 @@ impl GameState {
             return true;
         }
         if self.bombs.iter().any(|b| b.pos == pos) {
+            return true;
+        }
+        if self.items.iter().any(|i| i.pos == pos) {
             return true;
         }
         false
@@ -134,8 +167,54 @@ impl GameState {
 
     fn kill_mobs_in_explosions(&mut self) {
         let explosion_tiles: Vec<Pos> = self.explosions.iter().map(|(pos, _)| *pos).collect();
-        self.mobs
-            .retain(|mob| !explosion_tiles.iter().any(|pos| *pos == mob.pos));
+
+        let mut killed_mobs = Vec::new();
+        self.mobs.retain(|mob| {
+            let killed = explosion_tiles.iter().any(|pos| *pos == mob.pos);
+            if killed {
+                killed_mobs.push(*mob);
+            }
+            !killed
+        });
+
+        for mob in killed_mobs {
+            if self.roll_percent(ITEM_DROP_CHANCE_PERCENT) {
+                self.pending_item_drops.push(PendingItemDrop {
+                    pos: mob.pos,
+                    kind: ItemKind::RangeUp,
+                });
+            }
+        }
+    }
+
+    fn process_pending_item_drops(&mut self) {
+        let active_explosion_tiles: Vec<Pos> =
+            self.explosions.iter().map(|(pos, _)| *pos).collect();
+
+        self.pending_item_drops.retain(|drop| {
+            if active_explosion_tiles.iter().any(|pos| *pos == drop.pos) {
+                return true;
+            }
+
+            if !self.items.iter().any(|item| item.pos == drop.pos) {
+                self.items.push(Item {
+                    pos: drop.pos,
+                    kind: drop.kind,
+                });
+            }
+            false
+        });
+    }
+
+    fn try_pickup_item(&mut self) {
+        if let Some(index) = self.items.iter().position(|item| item.pos == self.player) {
+            let item = self.items.remove(index);
+            match item.kind {
+                ItemKind::RangeUp => {
+                    self.bomb_range = (self.bomb_range + 1).min(MAX_BOMB_RANGE);
+                }
+            }
+        }
     }
 
     fn update(&mut self) {
@@ -146,8 +225,7 @@ impl GameState {
             .bombs
             .iter()
             .filter(|b| {
-                !b.exploded
-                    && now.duration_since(b.placed_at).as_millis() as u64 >= BOMB_FUSE_MS
+                !b.exploded && now.duration_since(b.placed_at).as_millis() as u64 >= BOMB_FUSE_MS
             })
             .map(|b| b.pos)
             .collect();
@@ -169,6 +247,9 @@ impl GameState {
         self.explosions
             .retain(|(_, t)| now.duration_since(*t).as_millis() as u64 <= EXPLOSION_MS);
 
+        // 폭발이 끝난 몹 사망 위치에 아이템 드랍
+        self.process_pending_item_drops();
+
         // 폭발이 끝난 폭탄 제거
         self.bombs.retain(|b| {
             now.duration_since(b.placed_at).as_millis() as u64 <= BOMB_FUSE_MS + EXPLOSION_MS
@@ -185,20 +266,20 @@ impl GameState {
     }
 
     fn add_cross_explosion(&mut self, center: Pos, now: Instant) {
-        let dirs = [
-            Pos { x: 0, y: 0 },
-            Pos { x: 1, y: 0 },
-            Pos { x: -1, y: 0 },
-            Pos { x: 0, y: 1 },
-            Pos { x: 0, y: -1 },
-        ];
-        for d in dirs {
-            let p = Pos {
-                x: center.x + d.x,
-                y: center.y + d.y,
-            };
-            if p.x >= 0 && p.x < GRID_WIDTH && p.y >= 0 && p.y < GRID_HEIGHT {
-                self.explosions.push((p, now));
+        if center.x >= 0 && center.x < GRID_WIDTH && center.y >= 0 && center.y < GRID_HEIGHT {
+            self.explosions.push((center, now));
+        }
+
+        let directions = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        for (dx, dy) in directions {
+            for dist in 1..=self.bomb_range {
+                let p = Pos {
+                    x: center.x + dx * dist,
+                    y: center.y + dy * dist,
+                };
+                if p.x >= 0 && p.x < GRID_WIDTH && p.y >= 0 && p.y < GRID_HEIGHT {
+                    self.explosions.push((p, now));
+                }
             }
         }
     }
@@ -215,6 +296,7 @@ impl GameState {
         {
             self.player.x = nx;
             self.player.y = ny;
+            self.try_pickup_item();
         }
     }
 
@@ -273,6 +355,7 @@ unsafe fn paint(hwnd: HWND) {
     let player_brush = create_brush(255, 255, 255); // 흰색 플레이어
     let bomb_brush = create_brush(0, 0, 0); // 검정 폭탄
     let mob_brush = create_brush(220, 20, 60); // 빨간 몹
+    let item_brush = create_brush(50, 205, 50); // 초록 아이템
     let explosion_brush = create_brush(255, 215, 0); // 노랑 폭발
 
     // 전체 배경
@@ -301,6 +384,11 @@ unsafe fn paint(hwnd: HWND) {
         draw_cell(hdc, *pos, explosion_brush);
     }
 
+    // 아이템 (몹이 죽은 위치에 드랍)
+    for item in &state.items {
+        draw_cell(hdc, item.pos, item_brush);
+    }
+
     // 플레이어
     draw_cell(hdc, state.player, player_brush);
 
@@ -308,6 +396,7 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(player_brush.into());
     let _ = DeleteObject(bomb_brush.into());
     let _ = DeleteObject(mob_brush.into());
+    let _ = DeleteObject(item_brush.into());
     let _ = DeleteObject(explosion_brush.into());
 
     let _ = EndPaint(hwnd, &ps);
