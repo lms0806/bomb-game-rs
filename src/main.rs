@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use windows::core::PCSTR;
+use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, FillRect, SelectObject, DeleteObject, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
@@ -8,7 +8,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA, LoadCursorW, PostQuitMessage,
-    RegisterClassA, SetTimer, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
+    RegisterClassA, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
+    IDC_ARROW,
     MSG, SW_SHOW, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_TIMER, WNDCLASSA, WS_OVERLAPPEDWINDOW,
 };
 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -264,7 +265,7 @@ fn main() -> windows::core::Result<()> {
         let hwnd = CreateWindowExA(
             Default::default(),
             class_name,
-            PCSTR(b"Bomb Game (Arrow keys + Space)\0".as_ptr()),
+            PCSTR(b"BombGame\0".as_ptr()),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -279,6 +280,9 @@ fn main() -> windows::core::Result<()> {
         if hwnd.0.is_null() {
             panic!("Failed to create window");
         }
+
+        // 한글 제목은 유니코드 API로 설정해야 함 (PCSTR는 ASCII만 지원)
+        let _ = SetWindowTextW(hwnd, w!("폭탄 게임"));
 
         let _ = ShowWindow(hwnd, SW_SHOW);
 
