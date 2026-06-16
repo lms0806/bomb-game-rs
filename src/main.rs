@@ -1,3 +1,4 @@
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use windows::core::{w, PCSTR};
@@ -123,21 +124,10 @@ impl GameState {
     }
 }
 
-static mut GAME_STATE: Option<GameState> = None;
+static GAME_STATE: OnceLock<Mutex<GameState>> = OnceLock::new();
 
-fn init_game_state() {
-    unsafe {
-        if GAME_STATE.is_none() {
-            GAME_STATE = Some(GameState::new());
-        }
-    }
-}
-
-unsafe fn get_game_state_mut() -> &'static mut GameState {
-    if GAME_STATE.is_none() {
-        GAME_STATE = Some(GameState::new());
-    }
-    GAME_STATE.as_mut().unwrap()
+fn game_state() -> &'static Mutex<GameState> {
+    GAME_STATE.get_or_init(|| Mutex::new(GameState::new()))
 }
 
 unsafe fn create_brush(r: u8, g: u8, b: u8) -> HBRUSH {
@@ -181,7 +171,7 @@ unsafe fn paint(hwnd: HWND) {
     };
     FillRect(hdc, &rect, bg_brush);
 
-    let state = get_game_state_mut();
+    let state = game_state().lock().unwrap();
 
     // 폭탄
     for bomb in &state.bombs {
@@ -212,19 +202,18 @@ unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_CREATE => {
-            init_game_state();
+            let _ = game_state();
             SetTimer(Some(hwnd), TIMER_ID, TICK_MS, None);
         }
         WM_TIMER => {
             if wparam.0 == TIMER_ID {
-                let state = get_game_state_mut();
-                state.update();
+                game_state().lock().unwrap().update();
                 // 다시 그리기
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
         }
         WM_KEYDOWN => {
-            let state = get_game_state_mut();
+            let mut state = game_state().lock().unwrap();
             match wparam.0 as u32 {
                 0x25 => state.move_player(-1, 0), // VK_LEFT
                 0x26 => state.move_player(0, -1), // VK_UP
