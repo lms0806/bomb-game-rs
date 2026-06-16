@@ -378,47 +378,54 @@ fn game_state() -> &'static Mutex<GameState> {
 }
 
 unsafe fn create_brush(r: u8, g: u8, b: u8) -> HBRUSH {
-    // COLORREF: 0x00bbggrr
-    let color = COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16));
-    windows::Win32::Graphics::Gdi::CreateSolidBrush(color)
+    unsafe {
+        // COLORREF: 0x00bbggrr
+        let color = COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16));
+        windows::Win32::Graphics::Gdi::CreateSolidBrush(color)
+    }
 }
 
 unsafe fn draw_cell(hdc: HDC, grid_pos: Pos, brush: HBRUSH) {
-    let left = grid_pos.x * CELL_SIZE;
-    let top = grid_pos.y * CELL_SIZE;
-    let right = left + CELL_SIZE;
-    let bottom = top + CELL_SIZE;
+    unsafe {
+        let left = grid_pos.x * CELL_SIZE;
+        let top = grid_pos.y * CELL_SIZE;
+        let right = left + CELL_SIZE;
+        let bottom = top + CELL_SIZE;
 
-    let old: HGDIOBJ = SelectObject(hdc, brush.into());
-    let rect = RECT {
-        left,
-        top,
-        right,
-        bottom,
-    };
-    FillRect(hdc, &rect, brush);
-    SelectObject(hdc, old);
+        let old: HGDIOBJ = SelectObject(hdc, brush.into());
+        let rect = RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        FillRect(hdc, &rect, brush);
+        SelectObject(hdc, old);
+    }
 }
 
 unsafe fn draw_game_over_message(hdc: HDC, rect: &RECT) {
-    let _ = SetBkMode(hdc, TRANSPARENT);
-    let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
+    unsafe {
+        let _ = SetBkMode(hdc, TRANSPARENT);
+        let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
 
-    let mut text_rect = RECT {
-        left: rect.left,
-        top: rect.top + rect.bottom / 4,
-        right: rect.right,
-        bottom: rect.bottom,
-    };
+        let mut text_rect = RECT {
+            left: rect.left,
+            top: rect.top + rect.bottom / 4,
+            right: rect.right,
+            bottom: rect.bottom,
+        };
 
-    let mut message = "게임 오버\r\n\r\n스페이스바를 눌러 재시작"
-        .encode_utf16()
-        .collect::<Vec<u16>>();
+        let mut message = "게임 오버\r\n\r\n스페이스바를 눌러 재시작"
+            .encode_utf16()
+            .collect::<Vec<u16>>();
 
-    let _ = DrawTextW(hdc, &mut message, &mut text_rect, DT_CENTER | DT_WORDBREAK);
+        let _ = DrawTextW(hdc, &mut message, &mut text_rect, DT_CENTER | DT_WORDBREAK);
+    }
 }
 
 unsafe fn paint(hwnd: HWND) {
+    unsafe {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
 
@@ -485,7 +492,8 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(bomb_item_brush.into());
     let _ = DeleteObject(explosion_brush.into());
 
-    let _ = EndPaint(hwnd, &ps);
+        let _ = EndPaint(hwnd, &ps);
+    }
 }
 
 unsafe extern "system" fn wnd_proc(
@@ -494,6 +502,7 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    unsafe {
     match msg {
         WM_CREATE => {
             let _ = game_state();
@@ -546,7 +555,8 @@ unsafe extern "system" fn wnd_proc(
         _ => {}
     }
 
-    DefWindowProcA(hwnd, msg, wparam, lparam)
+        DefWindowProcA(hwnd, msg, wparam, lparam)
+    }
 }
 
 fn main() -> windows::core::Result<()> {
