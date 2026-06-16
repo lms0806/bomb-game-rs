@@ -4,8 +4,9 @@ use std::time::Instant;
 use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, DeleteObject, EndPaint, FillRect, InvalidateRect, SelectObject, HBRUSH, HDC,
-    HGDIOBJ, PAINTSTRUCT,
+    BeginPaint, DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect, SelectObject,
+    SetBkMode, SetTextColor, DT_CENTER, DT_WORDBREAK, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
+    TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -22,6 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
 // - 몹 처치 시 10% 확률로 아이템 드랍 (초록: 범위 증가, 노랑: 폭탄 개수 증가)
 // - 자신이 설치한 폭탄 폭발 범위에 들어가면 게임 오버
+// - 게임 오버 시 스페이스바로 재시작
 
 const CELL_SIZE: i32 = 40;
 const GRID_WIDTH: i32 = 13;
@@ -111,6 +113,10 @@ impl GameState {
         }
 
         state
+    }
+
+    fn restart(&mut self) {
+        *self = GameState::new();
     }
 
     fn next_random(&mut self) -> u32 {
@@ -395,6 +401,24 @@ unsafe fn draw_cell(hdc: HDC, grid_pos: Pos, brush: HBRUSH) {
     SelectObject(hdc, old);
 }
 
+unsafe fn draw_game_over_message(hdc: HDC, rect: &RECT) {
+    let _ = SetBkMode(hdc, TRANSPARENT);
+    let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
+
+    let mut text_rect = RECT {
+        left: rect.left,
+        top: rect.top + rect.bottom / 4,
+        right: rect.right,
+        bottom: rect.bottom,
+    };
+
+    let mut message = "게임 오버\r\n\r\n스페이스바를 눌러 재시작"
+        .encode_utf16()
+        .collect::<Vec<u16>>();
+
+    let _ = DrawTextW(hdc, &mut message, &mut text_rect, DT_CENTER | DT_WORDBREAK);
+}
+
 unsafe fn paint(hwnd: HWND) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
@@ -451,6 +475,7 @@ unsafe fn paint(hwnd: HWND) {
         let overlay_brush = create_brush(30, 30, 30);
         FillRect(hdc, &rect, overlay_brush);
         let _ = DeleteObject(overlay_brush.into());
+        draw_game_over_message(hdc, &rect);
     }
 
     let _ = DeleteObject(bg_brush.into());
@@ -494,6 +519,11 @@ unsafe extern "system" fn wnd_proc(
         WM_KEYDOWN => {
             let mut state = game_state().lock().unwrap();
             if state.game_over {
+                if wparam.0 as u32 == 0x20 {
+                    state.restart();
+                    let _ = SetWindowTextW(hwnd, w!("폭탄 게임"));
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
                 return LRESULT(0);
             }
 
