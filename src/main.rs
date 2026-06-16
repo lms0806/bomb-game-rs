@@ -19,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // - 방향키로 플레이어 이동
 // - Space 로 폭탄 설치
 // - 폭탄은 잠시 후 십자 모양으로 폭발
+// - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
 
 const CELL_SIZE: i32 = 40;
 const GRID_WIDTH: i32 = 13;
@@ -28,6 +29,9 @@ const TIMER_ID: usize = 1;
 const TICK_MS: u32 = 50;
 const BOMB_FUSE_MS: u64 = 1500;
 const EXPLOSION_MS: u64 = 400;
+const MAX_MOBS: usize = 8;
+const MOB_SPAWN_INTERVAL_MS: u64 = 2500;
+const INITIAL_MOB_COUNT: usize = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Pos {
@@ -42,50 +46,124 @@ struct Bomb {
     exploded: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Mob {
+    pos: Pos,
+}
+
 struct GameState {
     player: Pos,
     bombs: Vec<Bomb>,
     explosions: Vec<(Pos, Instant)>,
+    mobs: Vec<Mob>,
+    rng_state: u64,
+    last_spawn: Instant,
 }
 
 impl GameState {
     fn new() -> Self {
-        Self {
+        let now = Instant::now();
+        let mut state = Self {
             player: Pos { x: 1, y: 1 },
             bombs: Vec::new(),
             explosions: Vec::new(),
+            mobs: Vec::new(),
+            rng_state: now.elapsed().as_nanos() as u64 | 1,
+            last_spawn: now,
+        };
+
+        for _ in 0..INITIAL_MOB_COUNT {
+            state.spawn_mob();
         }
+
+        state
+    }
+
+    fn next_random(&mut self) -> u32 {
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
+        (self.rng_state >> 32) as u32
+    }
+
+    fn is_occupied(&self, pos: Pos) -> bool {
+        if self.player == pos {
+            return true;
+        }
+        if self.mobs.iter().any(|m| m.pos == pos) {
+            return true;
+        }
+        if self.bombs.iter().any(|b| b.pos == pos) {
+            return true;
+        }
+        false
+    }
+
+    fn random_empty_pos(&mut self) -> Option<Pos> {
+        let mut candidates = Vec::new();
+        for y in 0..GRID_HEIGHT {
+            for x in 0..GRID_WIDTH {
+                let pos = Pos { x, y };
+                if !self.is_occupied(pos) {
+                    candidates.push(pos);
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let index = (self.next_random() as usize) % candidates.len();
+        Some(candidates[index])
+    }
+
+    fn spawn_mob(&mut self) -> bool {
+        if self.mobs.len() >= MAX_MOBS {
+            return false;
+        }
+
+        let Some(pos) = self.random_empty_pos() else {
+            return false;
+        };
+
+        self.mobs.push(Mob { pos });
+        true
+    }
+
+    fn kill_mobs_in_explosions(&mut self) {
+        let explosion_tiles: Vec<Pos> = self.explosions.iter().map(|(pos, _)| *pos).collect();
+        self.mobs
+            .retain(|mob| !explosion_tiles.iter().any(|pos| *pos == mob.pos));
     }
 
     fn update(&mut self) {
         let now = Instant::now();
 
         // 폭탄 업데이트
+        let exploding: Vec<Pos> = self
+            .bombs
+            .iter()
+            .filter(|b| {
+                !b.exploded
+                    && now.duration_since(b.placed_at).as_millis() as u64 >= BOMB_FUSE_MS
+            })
+            .map(|b| b.pos)
+            .collect();
+
         for bomb in &mut self.bombs {
-            if !bomb.exploded
-                && now.duration_since(bomb.placed_at).as_millis() as u64 >= BOMB_FUSE_MS
-            {
+            if exploding.iter().any(|pos| *pos == bomb.pos) {
                 bomb.exploded = true;
-                // 십자형 폭발 생성
-                let center = bomb.pos;
-                let dirs = [
-                    Pos { x: 0, y: 0 },
-                    Pos { x: 1, y: 0 },
-                    Pos { x: -1, y: 0 },
-                    Pos { x: 0, y: 1 },
-                    Pos { x: 0, y: -1 },
-                ];
-                for d in dirs {
-                    let p = Pos {
-                        x: center.x + d.x,
-                        y: center.y + d.y,
-                    };
-                    if p.x >= 0 && p.x < GRID_WIDTH && p.y >= 0 && p.y < GRID_HEIGHT {
-                        self.explosions.push((p, now));
-                    }
-                }
             }
         }
+
+        for pos in exploding {
+            self.add_cross_explosion(pos, now);
+        }
+
+        // 폭발 범위에 있는 몹 제거
+        self.kill_mobs_in_explosions();
 
         // 오래된 폭발 제거
         self.explosions
@@ -95,12 +173,46 @@ impl GameState {
         self.bombs.retain(|b| {
             now.duration_since(b.placed_at).as_millis() as u64 <= BOMB_FUSE_MS + EXPLOSION_MS
         });
+
+        // 주기적으로 몹 스폰
+        if self.mobs.len() < MAX_MOBS
+            && now.duration_since(self.last_spawn).as_millis() as u64 >= MOB_SPAWN_INTERVAL_MS
+        {
+            if self.spawn_mob() {
+                self.last_spawn = now;
+            }
+        }
+    }
+
+    fn add_cross_explosion(&mut self, center: Pos, now: Instant) {
+        let dirs = [
+            Pos { x: 0, y: 0 },
+            Pos { x: 1, y: 0 },
+            Pos { x: -1, y: 0 },
+            Pos { x: 0, y: 1 },
+            Pos { x: 0, y: -1 },
+        ];
+        for d in dirs {
+            let p = Pos {
+                x: center.x + d.x,
+                y: center.y + d.y,
+            };
+            if p.x >= 0 && p.x < GRID_WIDTH && p.y >= 0 && p.y < GRID_HEIGHT {
+                self.explosions.push((p, now));
+            }
+        }
     }
 
     fn move_player(&mut self, dx: i32, dy: i32) {
         let nx = self.player.x + dx;
         let ny = self.player.y + dy;
-        if nx >= 0 && nx < GRID_WIDTH && ny >= 0 && ny < GRID_HEIGHT {
+        let next = Pos { x: nx, y: ny };
+        if nx >= 0
+            && nx < GRID_WIDTH
+            && ny >= 0
+            && ny < GRID_HEIGHT
+            && !self.mobs.iter().any(|m| m.pos == next)
+        {
             self.player.x = nx;
             self.player.y = ny;
         }
@@ -160,6 +272,7 @@ unsafe fn paint(hwnd: HWND) {
     let bg_brush = create_brush(30, 144, 255); // 파란 배경
     let player_brush = create_brush(255, 255, 255); // 흰색 플레이어
     let bomb_brush = create_brush(0, 0, 0); // 검정 폭탄
+    let mob_brush = create_brush(220, 20, 60); // 빨간 몹
     let explosion_brush = create_brush(255, 215, 0); // 노랑 폭발
 
     // 전체 배경
@@ -178,6 +291,11 @@ unsafe fn paint(hwnd: HWND) {
         draw_cell(hdc, bomb.pos, bomb_brush);
     }
 
+    // 몹
+    for mob in &state.mobs {
+        draw_cell(hdc, mob.pos, mob_brush);
+    }
+
     // 폭발
     for (pos, _) in &state.explosions {
         draw_cell(hdc, *pos, explosion_brush);
@@ -189,6 +307,7 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(bg_brush.into());
     let _ = DeleteObject(player_brush.into());
     let _ = DeleteObject(bomb_brush.into());
+    let _ = DeleteObject(mob_brush.into());
     let _ = DeleteObject(explosion_brush.into());
 
     let _ = EndPaint(hwnd, &ps);
@@ -278,7 +397,6 @@ fn main() -> windows::core::Result<()> {
             panic!("Failed to create window");
         }
 
-        // 한글 제목은 유니코드 API로 설정해야 함 (PCSTR는 ASCII만 지원)
         let _ = SetWindowTextW(hwnd, w!("폭탄 게임"));
 
         let _ = ShowWindow(hwnd, SW_SHOW);
