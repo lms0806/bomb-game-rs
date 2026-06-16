@@ -1,5 +1,7 @@
 # bomb-game-rs
 
+![폭탄 게임 이미지](image.png)
+
 크레이지아케이드 스타일의 간단한 폭탄 게임입니다.  
 [Rust `windows` 크레이트](https://docs.rs/windows/latest/windows/)와 Win32 API(GDI)로 만든 Windows 데스크톱 게임입니다.
 
