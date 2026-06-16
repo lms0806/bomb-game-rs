@@ -1,20 +1,19 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect, SelectObject,
-    SetBkMode, SetTextColor, DT_CENTER, DT_WORDBREAK, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
-    TRANSPARENT,
+    BeginPaint, DT_CENTER, DT_WORDBREAK, DeleteObject, DrawTextW, EndPaint, FillRect, HBRUSH, HDC,
+    HGDIOBJ, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA, LoadCursorW, PostQuitMessage,
-    RegisterClassA, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, IDC_ARROW, MSG, SW_SHOW, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_TIMER,
-    WNDCLASSA, WS_OVERLAPPEDWINDOW,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExA, DefWindowProcA, DispatchMessageA,
+    GetMessageA, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage, RegisterClassA, SW_SHOW, SetTimer,
+    SetWindowTextW, ShowWindow, TranslateMessage, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_PAINT,
+    WM_TIMER, WNDCLASSA, WS_OVERLAPPEDWINDOW,
 };
+use windows::core::{PCSTR, w};
 
 // 간단한 크레이지아케이드 스타일 폭탄 게임 예제
 // - 방향키로 플레이어 이동
