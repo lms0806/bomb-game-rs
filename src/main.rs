@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, DeleteObject, EndPaint, FillRect, SelectObject, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
+    BeginPaint, DeleteObject, EndPaint, FillRect, InvalidateRect, SelectObject, HBRUSH, HDC,
+    HGDIOBJ, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::{
