@@ -2,17 +2,17 @@ use std::time::Instant;
 
 use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, FillRect, SelectObject, DeleteObject, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
+    BeginPaint, DeleteObject, EndPaint, FillRect, SelectObject, HBRUSH, HDC, HGDIOBJ, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA, LoadCursorW, PostQuitMessage,
-    RegisterClassA, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    IDC_ARROW,
-    MSG, SW_SHOW, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_TIMER, WNDCLASSA, WS_OVERLAPPEDWINDOW,
+    RegisterClassA, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, IDC_ARROW, MSG, SW_SHOW, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_TIMER,
+    WNDCLASSA, WS_OVERLAPPEDWINDOW,
 };
-use windows::Win32::Graphics::Gdi::InvalidateRect;
 
 // 간단한 크레이지아케이드 스타일 폭탄 게임 예제
 // - 방향키로 플레이어 이동
@@ -61,7 +61,9 @@ impl GameState {
 
         // 폭탄 업데이트
         for bomb in &mut self.bombs {
-            if !bomb.exploded && now.duration_since(bomb.placed_at).as_millis() as u64 >= BOMB_FUSE_MS {
+            if !bomb.exploded
+                && now.duration_since(bomb.placed_at).as_millis() as u64 >= BOMB_FUSE_MS
+            {
                 bomb.exploded = true;
                 // 십자형 폭발 생성
                 let center = bomb.pos;
@@ -89,8 +91,9 @@ impl GameState {
             .retain(|(_, t)| now.duration_since(*t).as_millis() as u64 <= EXPLOSION_MS);
 
         // 폭발이 끝난 폭탄 제거
-        self.bombs
-            .retain(|b| now.duration_since(b.placed_at).as_millis() as u64 <= BOMB_FUSE_MS + EXPLOSION_MS);
+        self.bombs.retain(|b| {
+            now.duration_since(b.placed_at).as_millis() as u64 <= BOMB_FUSE_MS + EXPLOSION_MS
+        });
     }
 
     fn move_player(&mut self, dx: i32, dy: i32) {
@@ -201,7 +204,12 @@ unsafe fn paint(hwnd: HWND) {
     let _ = EndPaint(hwnd, &ps);
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_CREATE => {
             init_game_state();
@@ -222,7 +230,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 0x26 => state.move_player(0, -1), // VK_UP
                 0x27 => state.move_player(1, 0),  // VK_RIGHT
                 0x28 => state.move_player(0, 1),  // VK_DOWN
-                0x20 => state.place_bomb(),      // VK_SPACE
+                0x20 => state.place_bomb(),       // VK_SPACE
                 _ => {}
             }
             let _ = InvalidateRect(Some(hwnd), None, false);
@@ -296,4 +304,3 @@ fn main() -> windows::core::Result<()> {
 
     Ok(())
 }
-
