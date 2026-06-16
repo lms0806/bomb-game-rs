@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // - Space 로 폭탄 설치 (기본 1개만 동시에 사용 가능)
 // - 폭탄은 잠시 후 십자 모양으로 폭발
 // - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
-// - 몹 처치 시 10% 확률로 폭발 범위 증가 아이템 드랍
+// - 몹 처치 시 10% 확률로 아이템 드랍 (초록: 범위 증가, 노랑: 폭탄 개수 증가)
 
 const CELL_SIZE: i32 = 40;
 const GRID_WIDTH: i32 = 13;
@@ -35,6 +35,7 @@ const MOB_SPAWN_INTERVAL_MS: u64 = 2500;
 const INITIAL_MOB_COUNT: usize = 4;
 const ITEM_DROP_CHANCE_PERCENT: u32 = 10;
 const MAX_BOMB_RANGE: i32 = 5;
+const MAX_BOMBS: usize = 5;
 const DEFAULT_MAX_BOMBS: usize = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,6 +59,7 @@ struct Mob {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ItemKind {
     RangeUp,
+    BombCountUp,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -118,6 +120,14 @@ impl GameState {
 
     fn roll_percent(&mut self, percent: u32) -> bool {
         self.next_random() % 100 < percent
+    }
+
+    fn random_drop_kind(&mut self) -> ItemKind {
+        if self.next_random() % 2 == 0 {
+            ItemKind::RangeUp
+        } else {
+            ItemKind::BombCountUp
+        }
     }
 
     fn is_occupied(&self, pos: Pos) -> bool {
@@ -182,9 +192,10 @@ impl GameState {
 
         for mob in killed_mobs {
             if self.roll_percent(ITEM_DROP_CHANCE_PERCENT) {
+                let kind = self.random_drop_kind();
                 self.pending_item_drops.push(PendingItemDrop {
                     pos: mob.pos,
-                    kind: ItemKind::RangeUp,
+                    kind,
                 });
             }
         }
@@ -215,6 +226,9 @@ impl GameState {
             match item.kind {
                 ItemKind::RangeUp => {
                     self.bomb_range = (self.bomb_range + 1).min(MAX_BOMB_RANGE);
+                }
+                ItemKind::BombCountUp => {
+                    self.max_bombs = (self.max_bombs + 1).min(MAX_BOMBS);
                 }
             }
         }
@@ -363,8 +377,9 @@ unsafe fn paint(hwnd: HWND) {
     let player_brush = create_brush(255, 255, 255); // 흰색 플레이어
     let bomb_brush = create_brush(0, 0, 0); // 검정 폭탄
     let mob_brush = create_brush(220, 20, 60); // 빨간 몹
-    let item_brush = create_brush(50, 205, 50); // 초록 아이템
-    let explosion_brush = create_brush(255, 215, 0); // 노랑 폭발
+    let range_item_brush = create_brush(50, 205, 50); // 초록: 범위 증가
+    let bomb_item_brush = create_brush(255, 255, 0); // 노랑: 폭탄 개수 증가
+    let explosion_brush = create_brush(255, 165, 0); // 주황: 폭발
 
     // 전체 배경
     let rect = RECT {
@@ -394,7 +409,11 @@ unsafe fn paint(hwnd: HWND) {
 
     // 아이템 (몹이 죽은 위치에 드랍)
     for item in &state.items {
-        draw_cell(hdc, item.pos, item_brush);
+        let brush = match item.kind {
+            ItemKind::RangeUp => range_item_brush,
+            ItemKind::BombCountUp => bomb_item_brush,
+        };
+        draw_cell(hdc, item.pos, brush);
     }
 
     // 플레이어
@@ -404,7 +423,8 @@ unsafe fn paint(hwnd: HWND) {
     let _ = DeleteObject(player_brush.into());
     let _ = DeleteObject(bomb_brush.into());
     let _ = DeleteObject(mob_brush.into());
-    let _ = DeleteObject(item_brush.into());
+    let _ = DeleteObject(range_item_brush.into());
+    let _ = DeleteObject(bomb_item_brush.into());
     let _ = DeleteObject(explosion_brush.into());
 
     let _ = EndPaint(hwnd, &ps);
