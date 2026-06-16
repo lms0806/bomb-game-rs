@@ -17,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 // 간단한 크레이지아케이드 스타일 폭탄 게임 예제
 // - 방향키로 플레이어 이동
-// - Space 로 폭탄 설치
+// - Space 로 폭탄 설치 (기본 1개만 동시에 사용 가능)
 // - 폭탄은 잠시 후 십자 모양으로 폭발
 // - 랜덤 좌표에 몹이 나타나며, 폭발로 제거 가능
 // - 몹 처치 시 10% 확률로 폭발 범위 증가 아이템 드랍
@@ -35,6 +35,7 @@ const MOB_SPAWN_INTERVAL_MS: u64 = 2500;
 const INITIAL_MOB_COUNT: usize = 4;
 const ITEM_DROP_CHANCE_PERCENT: u32 = 10;
 const MAX_BOMB_RANGE: i32 = 5;
+const DEFAULT_MAX_BOMBS: usize = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Pos {
@@ -79,6 +80,7 @@ struct GameState {
     items: Vec<Item>,
     pending_item_drops: Vec<PendingItemDrop>,
     bomb_range: i32,
+    max_bombs: usize,
     rng_state: u64,
     last_spawn: Instant,
 }
@@ -94,6 +96,7 @@ impl GameState {
             items: Vec::new(),
             pending_item_drops: Vec::new(),
             bomb_range: 1,
+            max_bombs: DEFAULT_MAX_BOMBS,
             rng_state: now.elapsed().as_nanos() as u64 | 1,
             last_spawn: now,
         };
@@ -301,6 +304,11 @@ impl GameState {
     }
 
     fn place_bomb(&mut self) {
+        // 동시에 놓을 수 있는 폭탄 수 제한
+        if self.bombs.len() >= self.max_bombs {
+            return;
+        }
+
         // 해당 위치에 이미 폭탄이 있으면 무시
         if self
             .bombs
